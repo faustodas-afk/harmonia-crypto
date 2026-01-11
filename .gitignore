@@ -1,0 +1,20 @@
+# Compiled binaries
+harmonia_test
+harmonia_simd_test
+*.o
+*.a
+
+# macOS
+.DS_Store
+.__*
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
