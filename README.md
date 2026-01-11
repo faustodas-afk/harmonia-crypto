@@ -115,15 +115,40 @@ HARMONIA prioritizes novel cryptographic structure over raw speed.
 ```
 harmonia-crypto/
 ├── harmonia.py           # Python reference implementation
+├── harmonia_xof.py       # HARMONIA-XOF (Sponge/XOF variant)
 ├── harmonia.c            # C implementation
 ├── harmonia.h            # C header
 ├── harmonia_simd.c       # SIMD experimental (ARM NEON)
 ├── main.c                # C test driver and benchmarks
 ├── Makefile              # Build system
 ├── crypto_tests.py       # Cryptographic quality tests
-├── HARMONIA_Whitepaper.md    # Technical specification
-└── HARMONIA_Whitepaper.pdf   # Formatted whitepaper
+├── reduced_rounds_test.py # Security margin analysis
+├── HARMONIA_Whitepaper.md # Technical specification
+└── LICENSE               # MIT License
 ```
+
+## HARMONIA-XOF (Extendable Output)
+
+Sponge construction for arbitrary-length output:
+
+```python
+from harmonia_xof import harmonia_xof, HarmoniaXOF
+
+# Fixed length output
+digest = harmonia_xof(b"message", output_length=64)
+
+# Streaming
+xof = HarmoniaXOF()
+xof.absorb(b"message")
+output = xof.squeeze(1024)  # 1024 bytes
+```
+
+| Parameter | Value |
+|-----------|-------|
+| Rate | 256 bits |
+| Capacity | 256 bits |
+| Security | 128 bits |
+| Rounds | 24 |
 
 ## Algorithm Summary
 
