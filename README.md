@@ -150,6 +150,21 @@ output = xof.squeeze(1024)  # 1024 bytes
 | Security | 128 bits |
 | Rounds | 24 |
 
+## HARMONIA-Fast (32-Round Variant)
+
+Performance-optimized variant with 2x speedup:
+
+```python
+from harmonia_fast import harmonia_fast
+
+digest = harmonia_fast(b"message")  # 173 MB/s vs 80 MB/s
+```
+
+| Variant | Throughput | Security Margin |
+|---------|------------|-----------------|
+| HARMONIA-64 | ~80 MB/s | 56 rounds (7x) |
+| HARMONIA-Fast | ~173 MB/s | 24 rounds (4x) |
+
 ## Algorithm Summary
 
 ```

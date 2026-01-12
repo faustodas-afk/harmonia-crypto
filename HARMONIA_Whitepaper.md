@@ -45,6 +45,7 @@ This white paper presents the complete specification, design rationale, security
     - H: Reduced Rounds Analysis
     - I: Known Limitations and Attack Vectors
     - J: HARMONIA-XOF Specification
+    - K: HARMONIA-Fast (32-Round Variant)
 
 ---
 
@@ -937,3 +938,69 @@ HARMONIA-XOF("The quick brown fox", 32):
 - Mask generation (MGF)
 - Stream cipher construction
 - Arbitrary-length digest generation
+
+---
+
+## Appendix K: HARMONIA-Fast (32-Round Variant)
+
+### K.1 Overview
+
+HARMONIA-Fast is a performance-optimized variant using 32 rounds instead of 64, providing approximately 2x speedup while maintaining a conservative security margin.
+
+### K.2 Security Analysis
+
+| Parameter | HARMONIA-64 | HARMONIA-Fast |
+|-----------|-------------|---------------|
+| Rounds | 64 | 32 |
+| Full diffusion | Round 8 | Round 8 |
+| Security margin | 56 rounds (87.5%) | 24 rounds (75%) |
+| Margin over saturation | 7x | 4x |
+
+The 32-round variant still provides 4x the rounds needed for full diffusion, which is considered conservative in symmetric cryptography.
+
+### K.3 Performance Comparison
+
+Tested on Apple M2 Pro:
+
+| Variant | Throughput | Speedup |
+|---------|------------|---------|
+| HARMONIA-64 | ~80 MB/s | 1.0x |
+| HARMONIA-Fast | ~173 MB/s | 2.1x |
+| SHA-256 (OpenSSL) | ~2,500 MB/s | 31x |
+
+### K.4 Implementation
+
+**Python:**
+```python
+from harmonia_fast import harmonia_fast, harmonia_fast_hex
+
+digest = harmonia_fast(b"message")
+hex_digest = harmonia_fast_hex(b"message")
+```
+
+**C:**
+```c
+#include "harmonia_fast.c"
+
+uint8_t digest[32];
+harmonia_fast((uint8_t*)"message", 7, digest);
+```
+
+### K.5 Test Vectors
+
+```
+HARMONIA-Fast(""):
+f92a2df4bf588be9bd4eb5dba55834b09813346289379564779456d7f82cc988
+
+HARMONIA-Fast("abc"):
+ed8a7da8a85f4c6f6d813eb60f6bfee7420c60298d0d9123a622f59de3c6d092
+
+HARMONIA-Fast("HARMONIA"):
+df92aa953f269cbe7b50cf7efedea17b297b331782c3b286d137bfd85962da61
+```
+
+### K.6 Recommendations
+
+- **Use HARMONIA-64** when maximum security margin is required
+- **Use HARMONIA-Fast** when performance matters and 4x security margin is acceptable
+- **Do not use either** in production without formal cryptanalysis
