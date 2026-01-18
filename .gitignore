@@ -1,6 +1,8 @@
 # Compiled binaries
 harmonia_test
 harmonia_simd_test
+harmonia_ng_test
+harmonia_ng_simd_test
 *.o
 *.a
 

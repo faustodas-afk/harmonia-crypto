@@ -29,6 +29,9 @@ $(TARGET_SIMD): $(SOURCES_SIMD) $(HEADERS)
 $(TARGET_NG): $(SOURCES_NG) $(HEADERS_NG)
 	$(CC) $(CFLAGS) -DHARMONIA_NG_MAIN -o $(TARGET_NG) $(SOURCES_NG) $(LDFLAGS)
 
+harmonia_ng_simd_test: harmonia_ng_simd.c harmonia_ng.h
+	$(CC) $(CFLAGS) -DHARMONIA_NG_SIMD_MAIN -o harmonia_ng_simd_test harmonia_ng_simd.c $(LDFLAGS)
+
 debug: CFLAGS = -g -Wall -Wextra -O0
 debug: $(TARGET)
 
