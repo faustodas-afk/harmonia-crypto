@@ -9,7 +9,20 @@
 
 ## Overview
 
-HARMONIA is an experimental cryptographic hash function that explores novel mathematical structures for bit diffusion:
+HARMONIA is an experimental cryptographic hash function that explores **cryptographic biodiversity** — whether fundamentally different mathematical foundations can yield viable cryptographic constructions.
+
+### Why HARMONIA?
+
+Modern cryptography relies on a small set of algorithms sharing common foundations (SHA-256, SHA-3, BLAKE). If a breakthrough in cryptanalysis targets these shared foundations, the entire ecosystem could be vulnerable. HARMONIA deliberately uses **different mathematical foundations** as a research exploration and potential backup option.
+
+| Aspect | Traditional (SHA-256) | HARMONIA |
+|--------|----------------------|----------|
+| Constants | √2, √3 fractional parts | Golden ratio (φ) powers |
+| Scheduling | Linear/periodic | Fibonacci word (quasi-periodic) |
+| Rotations | Fixed per round | Quasicrystal projection (variable) |
+| State | Single stream | Dual stream (φ and 1/φ) |
+
+### Key Features
 
 - **Golden Ratio Constants** - State initialization and mixing based on φ = (1+√5)/2
 - **Fibonacci Word Scheduling** - Quasi-periodic round selection using the infinite Fibonacci word
@@ -32,7 +45,7 @@ Tested against SHA-256 on standard cryptographic metrics:
 
 **Total Score: HARMONIA 670.0 vs SHA-256 637.7**
 
-> ⚠️ **Disclaimer**: HARMONIA is experimental and has not undergone formal cryptanalysis. Do not use in production systems requiring proven security.
+> ⚠️ **Security Status**: HARMONIA is an experimental algorithm for **research purposes only**. It has NOT undergone formal cryptanalysis by the cryptographic community. Production systems **must** use established algorithms (SHA-256, SHA-3, BLAKE3) until HARMONIA receives thorough independent analysis. The value lies in exploring alternative mathematical foundations, not in replacing proven algorithms today.
 
 ## Quick Start
 
@@ -102,13 +115,23 @@ make
 
 ## Performance
 
-| Implementation | Throughput | Notes |
-|---------------|------------|-------|
-| Python | ~0.2 MB/s | Reference implementation |
-| C (scalar) | ~80 MB/s | Optimized with -O3 -march=native |
-| SHA-256 (OpenSSL) | ~500 MB/s | Hardware-accelerated |
+**HARMONIA is slow.** This is a deliberate trade-off for cryptographic diversity.
 
-HARMONIA prioritizes novel cryptographic structure over raw speed.
+| Algorithm | Throughput | Relative |
+|-----------|------------|----------|
+| SHA-256 (OpenSSL, SHA-NI) | ~2,500 MB/s | 31x |
+| BLAKE3 (optimized) | ~4,000 MB/s | 50x |
+| SHA-3-256 | ~800 MB/s | 10x |
+| **HARMONIA-Fast** (32 rounds) | ~173 MB/s | 2.1x |
+| **HARMONIA-64** | ~80 MB/s | 1x (baseline) |
+| Python (reference) | ~0.2 MB/s | — |
+
+The performance gap exists because:
+- No hardware acceleration (unlike SHA-NI for SHA-256)
+- Variable rotations prevent SIMD optimization
+- Dual-stream architecture doubles state operations
+
+**Implications:** HARMONIA is unsuitable for high-throughput applications. It may be acceptable for key derivation, digital signatures on small messages, or defense-in-depth scenarios.
 
 ## Project Structure
 
@@ -225,10 +248,11 @@ Please open an issue or pull request.
 
 ### Related Work
 
-- Boneh, D. et al. "Random Oracles are Practical" (1993)
-- Daemen, J. & Rijmen, V. "The Design of Rijndael" (2002)
+- Dumitrescu, P.T. et al. "Dynamical topological phase realized in a trapped-ion quantum simulator" Nature 607, 463–467 (2022) — *Inspiration for quasi-periodic structures*
 - Bertoni, G. et al. "Keccak" (SHA-3) (2012)
-- Aumasson, J.P. "Serious Cryptography" (2017)
+- Aumasson, J.-P. & Bernstein, D.J. "SipHash: a fast short-input PRF" (2012)
+- Biham, E. & Shamir, A. "Differential cryptanalysis of DES-like cryptosystems" (1991)
+- Matsui, M. "Linear cryptanalysis method for DES cipher" (1993)
 
 ## License
 

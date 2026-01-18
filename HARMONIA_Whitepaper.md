@@ -10,15 +10,15 @@
 
 ## Abstract
 
-HARMONIA is a novel 256-bit cryptographic hash function whose architecture draws inspiration from two mathematical phenomena: the golden ratio (φ ≈ 1.618) and the quasi-periodic structures observed in temporal quasicrystals. The design incorporates recent findings from quantum physics research demonstrating that Fibonacci-based pulse sequences can provide enhanced protection against decoherence in quantum systems.
+HARMONIA is a novel 256-bit cryptographic hash function whose architecture draws inspiration from two mathematical phenomena: the golden ratio (φ ≈ 1.618) and the quasi-periodic structures observed in temporal quasicrystals. The design incorporates recent findings from quantum physics research demonstrating that Fibonacci-based pulse sequences can provide enhanced protection against decoherence in quantum systems [Dumitrescu et al., Nature 2022].
 
 The algorithm features a dual-stream architecture processing data through parallel "golden" and "complementary" pathways, quasi-periodic round scheduling based on Fibonacci words, quasicrystalline rotation patterns derived from dimensional projection, and edge protection mechanisms inspired by topological quantum phases.
 
-Preliminary statistical analysis shows excellent avalanche characteristics (50.01% average bit diffusion), uniform output distribution (50.03% ones), and no detectable differential or linear biases. The algorithm achieves full diffusion within 8 rounds while employing 64 rounds total, providing a security margin of 56 rounds.
+**The primary contribution of this work is not to propose a replacement for established hash functions, but to explore cryptographic biodiversity**: whether fundamentally different mathematical foundations can yield viable cryptographic constructions. If conventional ARX or Sponge-based designs were compromised, algorithms built on irrational-number mathematics and projective geometry would offer a completely different attack surface.
 
-This white paper presents the complete specification, design rationale, security analysis, and reference implementation. HARMONIA is submitted as a research proposal for community review and analysis.
+Preliminary statistical analysis shows excellent avalanche characteristics (50.01% average bit diffusion) and uniform output distribution. The algorithm achieves full diffusion within 8 rounds while employing 64 rounds total, providing a security margin of 56 rounds (87.5%). This paper presents the complete specification, design rationale, security analysis including known limitations and potential attack vectors, and a reference implementation. HARMONIA is submitted as a research proposal for community review and cryptanalysis.
 
-**Keywords:** cryptographic hash function, golden ratio, Fibonacci sequence, quasicrystal, quasi-periodic systems, topological protection
+**Keywords:** cryptographic hash function, golden ratio, Fibonacci sequence, quasicrystal, cryptographic biodiversity, quasi-periodic systems
 
 ---
 
@@ -536,45 +536,83 @@ For a 256-bit hash (assuming ideal behavior):
 
 **Note**: These are theoretical upper bounds. Actual security depends on cryptanalytic resistance.
 
-### 6.6 Known Limitations
+### 6.6 Known Limitations and Potential Attack Vectors
 
-HARMONIA has NOT been subjected to:
+**Important:** This section explicitly documents known weaknesses. Transparent disclosure of limitations is essential for meaningful security evaluation. See Appendix I for detailed analysis.
+
+#### 6.6.1 Algebraic Attack Risk from φ-Derived Constants
+
+Because all constants derive from φ, algebraic relationships exist (φ² = φ + 1). An attacker could exploit these to simplify equations during algebraic attacks. This is a fundamental trade-off of the "nothing-up-my-sleeve" design.
+
+#### 6.6.2 Merkle-Damgård Length Extension Vulnerability
+
+HARMONIA is vulnerable to length extension attacks (shared with SHA-256, MD5). Use HMAC-HARMONIA or HARMONIA-XOF for applications requiring resistance.
+
+#### 6.6.3 Edge Protection Asymmetry
+
+State[0] and state[7] receive special treatment. This asymmetry could potentially be exploited if an attacker can control boundary values.
+
+#### 6.6.4 Complexity vs. Analyzability Trade-off
+
+The combination of variable rotations, dual-stream architecture, and quasi-periodic scheduling creates complexity that may hide subtle vulnerabilities.
+
+#### 6.6.5 Lack of Formal Cryptanalysis
+
+HARMONIA has **NOT** been subjected to:
 
 1. Professional academic cryptanalysis
 2. Formal differential/linear cryptanalysis proofs
 3. Algebraic attack analysis
 4. Side-channel evaluation
 5. Quantum attack assessment
+6. Multi-year public scrutiny (unlike SHA-256 and SHA-3)
+
+**The empirical tests in this paper can only detect gross statistical flaws; they cannot guarantee cryptographic security.**
 
 ---
 
 ## 7. Performance Characteristics
 
-### 7.1 Computational Complexity
+### 7.1 Performance Benchmarks
 
-Per 512-bit block:
-- 64 rounds of mixing operations
-- 64 quasicrystal rotation calculations
-- 8 edge protection applications
-- Message schedule expansion (48 words)
+| Algorithm | Throughput | Relative |
+|-----------|------------|----------|
+| SHA-256 (OpenSSL, SHA-NI) | ~2,500 MB/s | 31x |
+| BLAKE3 (optimized) | ~4,000 MB/s | 50x |
+| SHA-3-256 | ~800 MB/s | 10x |
+| **HARMONIA-Fast** (32 rounds) | ~173 MB/s | 2.1x |
+| **HARMONIA-64** | ~80 MB/s | 1x (baseline) |
 
-### 7.2 Reference Implementation Performance
+*Tested on Apple M2 Pro, single-threaded, large messages.*
 
-Python reference implementation (unoptimized):
-- Focus: Clarity over speed
-- Suitable for: Testing, education, verification
+### 7.2 Performance Limitations
 
-Expected optimized performance (C/Rust):
-- Competitive with SHA-256
-- Parallelizable dual streams
-- SIMD-friendly operations
+**HARMONIA is slow.** This is the most significant practical limitation of the algorithm. At ~80 MB/s (C implementation), it is approximately 30x slower than hardware-accelerated SHA-256 and 50x slower than BLAKE3.
+
+The performance gap has multiple causes:
+
+1. **No hardware acceleration** — No SHA-NI equivalent for φ-based operations
+2. **Variable rotations** — Prevent SIMD optimization (each word rotated differently)
+3. **Dual-stream architecture** — Doubles state operations
+4. **Reference implementation** — Prioritizes clarity over speed
+
+An optimized C/Rust/Assembly implementation could improve performance 5-10x, but would still not match SHA-256 with SHA-NI instructions.
 
 ### 7.3 Memory Requirements
 
 - State: 64 bytes (two 256-bit streams)
 - Message schedule: 256 bytes (64 words)
 - Constants: 128 bytes
-- Total: < 500 bytes working memory
+- Lookup tables: ~660 bytes (pre-computed rotations)
+- **Total: < 1.2 KB working memory**
+
+### 7.4 Computational Complexity
+
+Per 512-bit block:
+- 64 rounds of mixing operations
+- 64 quasicrystal rotation lookups (O(1) table access)
+- 8 edge protection applications
+- Message schedule expansion (48 words)
 
 ---
 
@@ -630,27 +668,45 @@ HARMONIA demonstrates that mathematical structures from nature—the golden rati
 - Rotation selection with structured unpredictability
 - Edge protection mimicking topological quantum effects
 
-Preliminary statistical analysis shows no obvious weaknesses, with excellent avalanche characteristics and uniform output distribution.
-
 ### 9.2 Contributions
 
-1. Novel application of Fibonacci words to round scheduling
-2. Quasicrystalline rotation derivation from dimensional projection
-3. Edge protection mechanism from topological quantum systems
-4. Optimized constant generation preserving φ-derivation
+1. **Novel application of Fibonacci words to round scheduling** — arguably the most innovative aspect of HARMONIA, breaking linear periodicity while maintaining analyzable structure
+2. **Quasicrystalline rotation derivation** from dimensional projection
+3. **Edge protection mechanism** inspired by topological quantum systems
+4. **Optimized constant generation** preserving φ-derivation with balanced Hamming weight
+5. **Integer-only implementation** for cross-platform determinism
+6. **Explicit documentation of limitations** and potential attack vectors
 
-### 9.3 Future Work
+### 9.3 Honest Assessment
+
+**As research:** HARMONIA is a well-documented exploration of alternative cryptographic foundations with novel ideas (particularly Fibonacci word scheduling) that may inspire future work.
+
+**As a product:** HARMONIA is premature for production use due to:
+- Slow performance (~30x slower than SHA-256)
+- Lack of independent cryptanalysis
+
+The value lies not in replacing SHA-256 today, but in:
+1. Expanding the mathematical toolkit available to cryptographers
+2. Providing a fundamentally different backup option should conventional approaches be compromised
+
+### 9.4 Future Work
 
 1. **Formal security proofs** in ideal cipher model
-2. **Community cryptanalysis** challenge
+2. **Community cryptanalysis challenge** — we particularly welcome:
+   - Algebraic attacks exploiting φ relationships
+   - Differential/linear cryptanalysis of reduced-round variants
+   - Analysis of the edge protection asymmetry
+   - Formal security proofs or disproofs
 3. **Hardware implementation** study (FPGA/ASIC)
 4. **HARMONIA-512** variant with larger state
-5. **Sponge construction** variant (HARMONIA-XOF)
-6. **Performance optimization** in C/Rust/Assembly
+5. **Optimized C/Rust implementation** (potential 5-10x speedup)
+6. **Algebraic attack analysis** specifically targeting φ-derived constant relationships
 
-### 9.4 Call for Analysis
+### 9.5 Call for Analysis
 
 We invite the cryptographic community to analyze HARMONIA's security properties. The algorithm, test vectors, and analysis tools are published openly for review.
+
+The goal is not validation, but rigorous evaluation—**positive or negative findings are equally valuable**.
 
 ---
 
@@ -673,6 +729,8 @@ We invite the cryptographic community to analyze HARMONIA's security properties.
 8. Biham, E., & Shamir, A. (1991). Differential cryptanalysis of DES-like cryptosystems. Journal of Cryptology, 4(1), 3-72.
 
 9. Matsui, M. (1993). Linear cryptanalysis method for DES cipher. In Advances in Cryptology—EUROCRYPT'93 (pp. 386-397). Springer.
+
+10. Aumasson, J.-P., & Bernstein, D. J. (2012). SipHash: a fast short-input PRF. In Progress in Cryptology—INDOCRYPT 2012.
 
 ---
 
@@ -901,36 +959,78 @@ Security margin: 48 rounds (75%)
 
 ## Appendix I: Known Limitations and Attack Vectors
 
-### I.1 Edge Protection Asymmetry
+This appendix explicitly documents known weaknesses and areas requiring further analysis. We believe transparent disclosure of limitations is essential for meaningful security evaluation.
 
-The `edge_protection` function applies special transformations to state indices 0 and 7. This creates a potential attack vector:
+### I.1 Algebraic Attack Risk from φ-Derived Constants
 
-**Concern:** Diffusion from center bits to edge bits may be slower than edge-to-center diffusion in early rounds.
+Because all constants derive from the golden ratio φ, there exist algebraic relationships between them. Most notably, φ² = φ + 1, and more generally φⁿ = F(n)φ + F(n−1) where F(n) is the n-th Fibonacci number.
+
+**Potential Attack:** An attacker could potentially exploit these relationships to simplify systems of equations during algebraic attacks using Gröbner bases or similar techniques.
+
+**Trade-off Analysis:** This is a fundamental trade-off: the "nothing-up-my-sleeve" property of φ-derived constants comes at the cost of algebraic structure that pseudo-random or prime-root constants would not have. We mitigate this partially through Hamming weight optimization and cross-constant decorrelation, but the underlying algebraic relationships remain.
+
+**Status:** Requires careful study by algebraic cryptanalysts.
+
+### I.2 Merkle-Damgård Length Extension Vulnerability
+
+HARMONIA uses the Merkle-Damgård construction with Davies-Meyer compression. This is vulnerable to length extension attacks: given H(m) without knowing m, an attacker can compute H(m || padding || m') for arbitrary suffix m'.
+
+**Shared Limitation:** This is a known limitation shared with SHA-256 and MD5.
+
+**Mitigation:** Applications requiring resistance to length extension should use HMAC-HARMONIA or the HARMONIA-XOF variant (Sponge construction, specified in Appendix J).
+
+### I.3 Edge Protection Asymmetry
+
+The edge protection mechanism treats state[0] and state[7] differently from interior elements. While inspired by topological protection in quantum systems, this asymmetry could potentially be exploited.
+
+**Potential Attack:** If an attacker can control or predict the values at state boundaries, they may gain leverage not available against interior state elements.
 
 **Mitigation:** Full diffusion is achieved by round 8, providing 56 rounds of security margin.
 
-### I.2 Algebraic Properties of φ-Constants
+**Status:** Requires dedicated cryptanalysis.
 
-Constants derived from φ have algebraic relationships (e.g., φ² = φ + 1). This could theoretically enable:
+### I.4 Complexity vs. Analyzability Trade-off
 
-- Algebraic attacks using Gröbner bases
-- Simplifications in system-of-equations representations
+The combination of variable rotations, dual-stream architecture, quasi-periodic scheduling, and edge protection creates significant complexity.
 
-**Assessment:** No practical attacks demonstrated. The mixing functions introduce sufficient non-linearity.
+**Concern:** In cryptography, complexity can be the enemy of security because it makes formal analysis difficult and may hide subtle vulnerabilities. Simpler constructions (like the Keccak permutation) can be easier to analyze and prove secure.
 
-### I.3 Performance Trade-offs
+**Assessment:** HARMONIA's complexity is a deliberate design choice to explore novel structures, but it comes with the caveat that comprehensive analysis will require substantial effort.
+
+### I.5 Lack of Formal Cryptanalysis
+
+HARMONIA has **NOT** been subjected to:
+
+1. Professional academic cryptanalysis
+2. Formal differential/linear cryptanalysis proofs
+3. Algebraic attack analysis
+4. Side-channel evaluation
+5. Quantum attack assessment
+6. Multi-year public scrutiny that SHA-256 and SHA-3 have received
+
+**Important:** The empirical tests presented in this paper can only detect gross statistical flaws; they cannot guarantee cryptographic security.
+
+### I.6 Performance Limitations
+
+HARMONIA is slow. This is the most significant practical limitation of the algorithm.
 
 | Factor | Impact |
 |--------|--------|
-| 512-bit dual state | 2x memory vs SHA-256 |
-| 64 complex rounds | ~30x slower than SHA-256 |
+| No hardware acceleration | No SHA-NI equivalent for φ-based operations |
 | Variable rotations | Prevents SIMD optimization |
+| 512-bit dual state | 2x memory operations vs SHA-256 |
+| 64 complex rounds | ~30x slower than hardware-accelerated SHA-256 |
 
-### I.4 Not Suitable For
-
-- High-throughput bulk hashing
+**Implications:** HARMONIA is unsuitable for:
+- High-throughput bulk hashing (file system integrity, blockchain PoW)
 - Embedded systems with < 1KB RAM
 - Time-critical authentication loops
+
+**Acceptable for:**
+- Low-volume applications where cryptographic diversity is valued over speed
+- Key derivation functions
+- Digital signatures on small messages
+- Defense-in-depth scenarios
 
 ---
 
