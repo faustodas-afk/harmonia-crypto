@@ -2,7 +2,7 @@
 
 **A 256-bit Cryptographic Hash Function Based on Golden Ratio Dynamics and Temporal Quasicrystals**
 
-[![Version](https://img.shields.io/badge/version-2.2-blue.svg)](https://github.com/faustodas-afk/harmonia-crypto)
+[![Version](https://img.shields.io/badge/version-3.0-blue.svg)](https://github.com/faustodas-afk/harmonia-crypto)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-yellow.svg)](https://www.python.org/)
 [![C](https://img.shields.io/badge/C-C99-orange.svg)](https://en.wikipedia.org/wiki/C99)
@@ -122,6 +122,8 @@ make
 | SHA-256 (OpenSSL, SHA-NI) | ~2,500 MB/s | 31x |
 | BLAKE3 (optimized) | ~4,000 MB/s | 50x |
 | SHA-3-256 | ~800 MB/s | 10x |
+| **HARMONIA-NG (x4 SIMD)** | ~314 MB/s | 3.9x |
+| **HARMONIA-NG (scalar)** | ~171 MB/s | 2.1x |
 | **HARMONIA-Fast** (32 rounds) | ~173 MB/s | 2.1x |
 | **HARMONIA-64** | ~80 MB/s | 1x (baseline) |
 | Python (reference) | ~0.2 MB/s | — |
@@ -145,9 +147,10 @@ harmonia-crypto/
 ├── harmonia.c            # C implementation (64 rounds)
 ├── harmonia.h            # C header
 ├── harmonia_fast.c       # HARMONIA-Fast C implementation
-├── harmonia_ng.c         # HARMONIA-NG C implementation (SIMD-ready)
+├── harmonia_ng.c         # HARMONIA-NG C scalar implementation
 ├── harmonia_ng.h         # HARMONIA-NG C header
-├── harmonia_simd.c       # SIMD experimental (ARM NEON)
+├── harmonia_ng_simd.c    # HARMONIA-NG SIMD (ARM NEON, x4 parallel)
+├── harmonia_simd.c       # Legacy SIMD experimental
 ├── main.c                # C test driver and benchmarks
 ├── Makefile              # Build system
 ├── crypto_tests.py       # Cryptographic quality tests
@@ -196,13 +199,26 @@ digest = harmonia_fast(b"message")  # 173 MB/s vs 80 MB/s
 
 ## HARMONIA-NG (Next Generation - SIMD Optimized)
 
-**NEW**: SIMD-friendly redesign for maximum performance while preserving cryptographic biodiversity.
+**v3.0**: SIMD-friendly redesign achieving **3.9x speedup** over HARMONIA-64 while preserving cryptographic biodiversity.
+
+### Single Message API
 
 ```python
 from harmonia_ng import harmonia_ng, harmonia_ng_hex
 
 digest = harmonia_ng(b"message")
 hex_digest = harmonia_ng_hex(b"message")
+```
+
+### Multi-Message Parallel API (4x throughput)
+
+```c
+#include "harmonia_ng.h"
+
+// Hash 4 messages simultaneously using SIMD
+const uint8_t *msgs[4] = {msg1, msg2, msg3, msg4};
+uint8_t *digests[4] = {out1, out2, out3, out4};
+harmonia_ng_x4(msgs, len, digests);  // 314 MB/s on Apple M2
 ```
 
 ### Key Improvements over HARMONIA-64
@@ -212,8 +228,14 @@ hex_digest = harmonia_ng_hex(b"message")
 | **Rotations** | Variable per word | Fixed per round (SIMD-friendly) |
 | **Mix function** | `(a*3) ^ (b*5)` | ChaCha-style quarter-round |
 | **Rounds** | 64 | 32 |
-| **Throughput** | ~80 MB/s | ~120 MB/s (scalar), **target 1+ GB/s (SIMD)** |
-| **Security margin** | 56 rounds (7x) | 31 rounds (97%) |
+| **Throughput (scalar)** | ~80 MB/s | ~171 MB/s |
+| **Throughput (x4 SIMD)** | N/A | **~314 MB/s** |
+| **Saturation round** | 8 | 1 ("Less is More" paradox) |
+| **Security margin** | 56 rounds (87%) | 31 rounds (97%) |
+
+### The "Less is More" Paradox
+
+Counter-intuitively, HARMONIA-NG achieves **faster diffusion saturation** (round 1 vs round 8) despite using "simpler" fixed rotations. The ChaCha-style quarter-round provides more aggressive cross-word diffusion than variable per-word rotations.
 
 ### Design Philosophy
 
@@ -222,8 +244,9 @@ HARMONIA-NG preserves the mathematical identity of HARMONIA (Fibonacci schedulin
 1. **Fixed rotations per round**: All 8 state words rotate by the same amount, enabling 4-way (NEON) or 8-way (AVX2) parallelism
 2. **Fibonacci-selected rotations**: The quasi-periodic Fibonacci word selects from two rotation sets (A and B), preserving the "soul" of HARMONIA
 3. **ChaCha-style quarter-round**: Proven, well-analyzed ARX structure
+4. **Multi-message parallel API**: True SIMD benefits through `harmonia_ng_x4()`
 
-### Test Vectors (v1.0)
+### Test Vectors
 
 ```
 Input: "" (empty)
