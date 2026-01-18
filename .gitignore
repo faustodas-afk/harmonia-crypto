@@ -19,3 +19,9 @@ __pycache__/
 .idea/
 
 harmonia_fast_test
+
+# Session/private files (local only)
+CLAUDE_SESSION.md
+*.private
+*.local
+NOTES*.md
