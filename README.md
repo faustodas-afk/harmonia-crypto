@@ -137,10 +137,16 @@ The performance gap exists because:
 
 ```
 harmonia-crypto/
-├── harmonia.py           # Python reference implementation
+├── harmonia.py           # Python reference implementation (64 rounds)
+├── harmonia_fast.py      # HARMONIA-Fast (32 rounds)
 ├── harmonia_xof.py       # HARMONIA-XOF (Sponge/XOF variant)
-├── harmonia.c            # C implementation
+├── harmonia_ng.py        # HARMONIA-NG Python reference
+├── harmonia_ng_test.py   # HARMONIA-NG security validation
+├── harmonia.c            # C implementation (64 rounds)
 ├── harmonia.h            # C header
+├── harmonia_fast.c       # HARMONIA-Fast C implementation
+├── harmonia_ng.c         # HARMONIA-NG C implementation (SIMD-ready)
+├── harmonia_ng.h         # HARMONIA-NG C header
 ├── harmonia_simd.c       # SIMD experimental (ARM NEON)
 ├── main.c                # C test driver and benchmarks
 ├── Makefile              # Build system
@@ -187,6 +193,48 @@ digest = harmonia_fast(b"message")  # 173 MB/s vs 80 MB/s
 |---------|------------|-----------------|
 | HARMONIA-64 | ~80 MB/s | 56 rounds (7x) |
 | HARMONIA-Fast | ~173 MB/s | 24 rounds (4x) |
+
+## HARMONIA-NG (Next Generation - SIMD Optimized)
+
+**NEW**: SIMD-friendly redesign for maximum performance while preserving cryptographic biodiversity.
+
+```python
+from harmonia_ng import harmonia_ng, harmonia_ng_hex
+
+digest = harmonia_ng(b"message")
+hex_digest = harmonia_ng_hex(b"message")
+```
+
+### Key Improvements over HARMONIA-64
+
+| Feature | HARMONIA-64 | HARMONIA-NG |
+|---------|-------------|-------------|
+| **Rotations** | Variable per word | Fixed per round (SIMD-friendly) |
+| **Mix function** | `(a*3) ^ (b*5)` | ChaCha-style quarter-round |
+| **Rounds** | 64 | 32 |
+| **Throughput** | ~80 MB/s | ~120 MB/s (scalar), **target 1+ GB/s (SIMD)** |
+| **Security margin** | 56 rounds (7x) | 31 rounds (97%) |
+
+### Design Philosophy
+
+HARMONIA-NG preserves the mathematical identity of HARMONIA (Fibonacci scheduling, golden ratio constants, dual streams) while enabling SIMD vectorization:
+
+1. **Fixed rotations per round**: All 8 state words rotate by the same amount, enabling 4-way (NEON) or 8-way (AVX2) parallelism
+2. **Fibonacci-selected rotations**: The quasi-periodic Fibonacci word selects from two rotation sets (A and B), preserving the "soul" of HARMONIA
+3. **ChaCha-style quarter-round**: Proven, well-analyzed ARX structure
+
+### Test Vectors (v1.0)
+
+```
+Input: "" (empty)
+HARMONIA-NG: f0861e3ad1a2a438b4ceea78d14f21074dcd712b073917b28d7ae7fad8f6a562
+
+Input: "Harmonia"
+HARMONIA-NG: 11cd23650f8fd4818848bc6f09da18b06403ed6f5250447c5d1036730cb8987c
+
+Input: "HARMONIA-NG"
+HARMONIA-NG: 6d310650be2092be611cf35ea8dcc46b8199a3f6299398fa68dcf73f80f8a334
+```
 
 ## Algorithm Summary
 
