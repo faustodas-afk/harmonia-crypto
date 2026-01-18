@@ -55,6 +55,18 @@ static const uint8_t ROUND_PATTERN[32] = {
     0, 7, 0, 1, 2, 3, 1, 4, 0, 1, 2, 5, 0, 4, 1, 0
 };
 
+/* Pre-computed edge protection constants: FIBONACCI[r%12] * 0x9E3779B9 */
+static const uint32_t EDGE_CONSTANTS[32] = {
+    0x9E3779B9U * 1,   0x9E3779B9U * 1,   0x9E3779B9U * 2,   0x9E3779B9U * 3,
+    0x9E3779B9U * 5,   0x9E3779B9U * 8,   0x9E3779B9U * 13,  0x9E3779B9U * 21,
+    0x9E3779B9U * 34,  0x9E3779B9U * 55,  0x9E3779B9U * 89,  0x9E3779B9U * 144,
+    0x9E3779B9U * 1,   0x9E3779B9U * 1,   0x9E3779B9U * 2,   0x9E3779B9U * 3,
+    0x9E3779B9U * 5,   0x9E3779B9U * 8,   0x9E3779B9U * 13,  0x9E3779B9U * 21,
+    0x9E3779B9U * 34,  0x9E3779B9U * 55,  0x9E3779B9U * 89,  0x9E3779B9U * 144,
+    0x9E3779B9U * 1,   0x9E3779B9U * 1,   0x9E3779B9U * 2,   0x9E3779B9U * 3,
+    0x9E3779B9U * 5,   0x9E3779B9U * 8,   0x9E3779B9U * 13,  0x9E3779B9U * 21
+};
+
 /* ============================================================================
  * OPTIMIZED SCALAR IMPLEMENTATION
  * ============================================================================ */
@@ -198,7 +210,7 @@ static void compress_simd(const uint8_t *block, uint32_t *state_g, uint32_t *sta
 
         /* Edge protection every 8 rounds */
         if ((r + 1) % 8 == 0) {
-            uint32_t fib = FIBONACCI[r % 12] * 0x9E3779B9U;
+            uint32_t fib = EDGE_CONSTANTS[r];
 
             /* Golden stream */
             g[0] = (g[0] >> 7) | (g[0] << 25);
@@ -257,7 +269,7 @@ static void compress_simd(const uint8_t *block, uint32_t *state_g, uint32_t *sta
 } while(0)
 
 /* Apply round function to 4 messages in parallel */
-static void round_x4(uint32x4_t g[8], uint32x4_t c[8], int pattern)
+static inline __attribute__((always_inline)) void round_x4(uint32x4_t g[8], uint32x4_t c[8], int pattern)
 {
     /* Column QRs: (0,1,2,3), (4,5,6,7) for both streams */
     switch (pattern) {
@@ -344,34 +356,83 @@ static void round_x4(uint32x4_t g[8], uint32x4_t c[8], int pattern)
     }
 }
 
-/* Compress 4 blocks in parallel */
+/* SIMD message parsing - converts big-endian bytes to uint32 vectors */
+static inline uint32x4_t parse_word_x4(const uint8_t *b0, const uint8_t *b1,
+                                        const uint8_t *b2, const uint8_t *b3, int idx)
+{
+    return (uint32x4_t){
+        ((uint32_t)b0[idx*4] << 24) | ((uint32_t)b0[idx*4+1] << 16) |
+        ((uint32_t)b0[idx*4+2] << 8) | (uint32_t)b0[idx*4+3],
+        ((uint32_t)b1[idx*4] << 24) | ((uint32_t)b1[idx*4+1] << 16) |
+        ((uint32_t)b1[idx*4+2] << 8) | (uint32_t)b1[idx*4+3],
+        ((uint32_t)b2[idx*4] << 24) | ((uint32_t)b2[idx*4+1] << 16) |
+        ((uint32_t)b2[idx*4+2] << 8) | (uint32_t)b2[idx*4+3],
+        ((uint32_t)b3[idx*4] << 24) | ((uint32_t)b3[idx*4+1] << 16) |
+        ((uint32_t)b3[idx*4+2] << 8) | (uint32_t)b3[idx*4+3]
+    };
+}
+
+/* Sigma functions with compile-time constant rotations */
+#define SIGMA0_VEC(w, R1, R2) veorq_u32(veorq_u32(ROTR_VEC(w, R1), ROTR_VEC(w, R2)), vshrq_n_u32(w, 3))
+#define SIGMA1_VEC(w, R1, R2) veorq_u32(veorq_u32(ROTR_VEC(w, R1), ROTR_VEC(w, R2)), vshrq_n_u32(w, 10))
+
+/* Compress 4 blocks in parallel with SIMD message expansion */
 static void compress_x4(const uint8_t *blocks[4], uint32x4_t state_g[8], uint32x4_t state_c[8])
 {
-    uint32_t w[4][32];  /* Message schedule for each of 4 messages */
+    uint32x4_t w[32];  /* Message schedule as SIMD vectors */
     uint32x4_t g[8], c[8];
-    int r, i, m;
+    int i;
+    const uint8_t *b0 = blocks[0], *b1 = blocks[1], *b2 = blocks[2], *b3 = blocks[3];
 
-    /* Parse and expand all 4 blocks */
-    for (m = 0; m < 4; m++) {
-        const uint8_t *block = blocks[m];
-        for (i = 0; i < 16; i++) {
-            w[m][i] = ((uint32_t)block[i*4] << 24) |
-                      ((uint32_t)block[i*4+1] << 16) |
-                      ((uint32_t)block[i*4+2] << 8) |
-                      ((uint32_t)block[i*4+3]);
-        }
-        for (i = 16; i < 32; i++) {
-            int rot1 = 7 + (i % 5);
-            int rot2 = 17 + (i % 4);
-            uint32_t s0 = ((w[m][i-15] >> rot1) | (w[m][i-15] << (32-rot1))) ^
-                          ((w[m][i-15] >> (rot1+11)) | (w[m][i-15] << (32-(rot1+11)))) ^
-                          (w[m][i-15] >> 3);
-            uint32_t s1 = ((w[m][i-2] >> rot2) | (w[m][i-2] << (32-rot2))) ^
-                          ((w[m][i-2] >> (rot2+2)) | (w[m][i-2] << (32-(rot2+2)))) ^
-                          (w[m][i-2] >> 10);
-            w[m][i] = w[m][i-16] + s0 + w[m][i-7] + s1 + FIBONACCI[i % 12];
-        }
+    /* Parse all 16 words from 4 blocks in parallel */
+    for (i = 0; i < 16; i++) {
+        w[i] = parse_word_x4(b0, b1, b2, b3, i);
     }
+
+    /* Message expansion - unrolled with compile-time constant rotations
+     * rot1 cycles through: 8,9,10,11,7 (7 + i%5 for i=16..31)
+     * rot2 cycles through: 17,18,19,20 (17 + i%4 for i=16..31)
+     * We unroll to use fixed rotation constants for SIMD efficiency
+     */
+    #define EXPAND_WORD(idx, R1A, R1B, R2A, R2B, FIB) \
+        w[idx] = vaddq_u32(vaddq_u32(vaddq_u32(w[idx-16], \
+                 SIGMA0_VEC(w[idx-15], R1A, R1B)), w[idx-7]), \
+                 vaddq_u32(SIGMA1_VEC(w[idx-2], R2A, R2B), vdupq_n_u32(FIB)))
+
+    /* i=16: rot1=8, rot1+11=19, rot2=17, rot2+2=19, fib=5 */
+    EXPAND_WORD(16, 8, 19, 17, 19, FIBONACCI[16 % 12]);
+    /* i=17: rot1=9, rot1+11=20, rot2=18, rot2+2=20, fib=8 */
+    EXPAND_WORD(17, 9, 20, 18, 20, FIBONACCI[17 % 12]);
+    /* i=18: rot1=10, rot1+11=21, rot2=19, rot2+2=21, fib=13 */
+    EXPAND_WORD(18, 10, 21, 19, 21, FIBONACCI[18 % 12]);
+    /* i=19: rot1=11, rot1+11=22, rot2=20, rot2+2=22, fib=21 */
+    EXPAND_WORD(19, 11, 22, 20, 22, FIBONACCI[19 % 12]);
+    /* i=20: rot1=7, rot1+11=18, rot2=17, rot2+2=19, fib=34 */
+    EXPAND_WORD(20, 7, 18, 17, 19, FIBONACCI[20 % 12]);
+    /* i=21: rot1=8, rot1+11=19, rot2=18, rot2+2=20, fib=55 */
+    EXPAND_WORD(21, 8, 19, 18, 20, FIBONACCI[21 % 12]);
+    /* i=22: rot1=9, rot1+11=20, rot2=19, rot2+2=21, fib=89 */
+    EXPAND_WORD(22, 9, 20, 19, 21, FIBONACCI[22 % 12]);
+    /* i=23: rot1=10, rot1+11=21, rot2=20, rot2+2=22, fib=144 */
+    EXPAND_WORD(23, 10, 21, 20, 22, FIBONACCI[23 % 12]);
+    /* i=24: rot1=11, rot1+11=22, rot2=17, rot2+2=19, fib=1 */
+    EXPAND_WORD(24, 11, 22, 17, 19, FIBONACCI[24 % 12]);
+    /* i=25: rot1=7, rot1+11=18, rot2=18, rot2+2=20, fib=1 */
+    EXPAND_WORD(25, 7, 18, 18, 20, FIBONACCI[25 % 12]);
+    /* i=26: rot1=8, rot1+11=19, rot2=19, rot2+2=21, fib=2 */
+    EXPAND_WORD(26, 8, 19, 19, 21, FIBONACCI[26 % 12]);
+    /* i=27: rot1=9, rot1+11=20, rot2=20, rot2+2=22, fib=3 */
+    EXPAND_WORD(27, 9, 20, 20, 22, FIBONACCI[27 % 12]);
+    /* i=28: rot1=10, rot1+11=21, rot2=17, rot2+2=19, fib=5 */
+    EXPAND_WORD(28, 10, 21, 17, 19, FIBONACCI[28 % 12]);
+    /* i=29: rot1=11, rot1+11=22, rot2=18, rot2+2=20, fib=8 */
+    EXPAND_WORD(29, 11, 22, 18, 20, FIBONACCI[29 % 12]);
+    /* i=30: rot1=7, rot1+11=18, rot2=19, rot2+2=21, fib=13 */
+    EXPAND_WORD(30, 7, 18, 19, 21, FIBONACCI[30 % 12]);
+    /* i=31: rot1=8, rot1+11=19, rot2=20, rot2+2=22, fib=21 */
+    EXPAND_WORD(31, 8, 19, 20, 22, FIBONACCI[31 % 12]);
+
+    #undef EXPAND_WORD
 
     /* Copy state to working vectors */
     for (i = 0; i < 8; i++) {
@@ -379,60 +440,99 @@ static void compress_x4(const uint8_t *blocks[4], uint32x4_t state_g[8], uint32x
         c[i] = state_c[i];
     }
 
-    /* 32 rounds */
-    for (r = 0; r < 32; r++) {
-        int pattern = ROUND_PATTERN[r];
-        uint32x4_t k_phi = vdupq_n_u32(PHI_CONSTANTS[r % 16]);
-        uint32x4_t k_rec = vdupq_n_u32(RECIPROCAL_CONSTANTS[r % 16]);
+    /* 32 rounds - unrolled in groups of 4 for efficiency */
+    #define ROUND_X4_INJECT(R, PAT, PHI_IDX, REC_IDX) do { \
+        g[0] = vaddq_u32(g[0], w[R]); \
+        c[0] = vaddq_u32(c[0], w[31-(R)]); \
+        g[4] = veorq_u32(g[4], vdupq_n_u32(PHI_CONSTANTS[PHI_IDX])); \
+        c[4] = veorq_u32(c[4], vdupq_n_u32(RECIPROCAL_CONSTANTS[REC_IDX])); \
+        round_x4(g, c, PAT); \
+    } while(0)
 
-        /* Message injection: g[0] += w[r], c[0] += w[31-r] */
-        uint32x4_t w_fwd = {w[0][r], w[1][r], w[2][r], w[3][r]};
-        uint32x4_t w_rev = {w[0][31-r], w[1][31-r], w[2][31-r], w[3][31-r]};
-        g[0] = vaddq_u32(g[0], w_fwd);
-        c[0] = vaddq_u32(c[0], w_rev);
+    #define CROSS_STREAM_DIFFUSION() do { \
+        for (i = 0; i < 8; i++) { \
+            uint32x4_t temp = veorq_u32(g[i], c[(i + 3) % 8]); \
+            g[i] = vaddq_u32(g[i], ROTR_VEC(temp, 11)); \
+            c[i] = veorq_u32(c[i], ROTL_VEC(temp, 11)); \
+        } \
+    } while(0)
 
-        /* Constant injection */
-        g[4] = veorq_u32(g[4], k_phi);
-        c[4] = veorq_u32(c[4], k_rec);
+    #define EDGE_PROTECTION(R) do { \
+        uint32x4_t fib = vdupq_n_u32(EDGE_CONSTANTS[R]); \
+        uint32x4_t not_fib = vmvnq_u32(fib); \
+        g[0] = veorq_u32(ROTR_VEC(g[0], 7), fib); \
+        g[7] = veorq_u32(ROTL_VEC(g[7], 13), not_fib); \
+        uint32x4_t ig = vshrq_n_u32(veorq_u32(g[0], g[7]), 16); \
+        g[0] = vaddq_u32(g[0], ig); g[7] = vaddq_u32(g[7], ig); \
+        c[0] = veorq_u32(ROTR_VEC(c[0], 7), fib); \
+        c[7] = veorq_u32(ROTL_VEC(c[7], 13), not_fib); \
+        uint32x4_t ic = vshrq_n_u32(veorq_u32(c[0], c[7]), 16); \
+        c[0] = vaddq_u32(c[0], ic); c[7] = vaddq_u32(c[7], ic); \
+    } while(0)
 
-        /* Apply round function to all 4 messages */
-        round_x4(g, c, pattern);
+    /* Rounds 0-3, then cross-stream */
+    ROUND_X4_INJECT(0, 0, 0, 0);
+    ROUND_X4_INJECT(1, 1, 1, 1);
+    ROUND_X4_INJECT(2, 2, 2, 2);
+    ROUND_X4_INJECT(3, 3, 3, 3);
+    CROSS_STREAM_DIFFUSION();
 
-        /* Cross-stream diffusion every 4 rounds */
-        if ((r + 1) % 4 == 0) {
-            for (i = 0; i < 8; i++) {
-                uint32x4_t temp = veorq_u32(g[i], c[(i + 3) % 8]);
-                uint32x4_t tl = ROTL_VEC(temp, 11);
-                uint32x4_t tr = ROTR_VEC(temp, 11);
-                g[i] = vaddq_u32(g[i], tr);
-                c[i] = veorq_u32(c[i], tl);
-            }
-        }
+    /* Rounds 4-7, then cross-stream + edge */
+    ROUND_X4_INJECT(4, 1, 4, 4);
+    ROUND_X4_INJECT(5, 4, 5, 5);
+    ROUND_X4_INJECT(6, 1, 6, 6);
+    ROUND_X4_INJECT(7, 0, 7, 7);
+    CROSS_STREAM_DIFFUSION();
+    EDGE_PROTECTION(7);
 
-        /* Edge protection every 8 rounds */
-        if ((r + 1) % 8 == 0) {
-            uint32x4_t fib = vdupq_n_u32(FIBONACCI[r % 12] * 0x9E3779B9U);
-            uint32x4_t not_fib = vmvnq_u32(fib);
+    /* Rounds 8-11, then cross-stream */
+    ROUND_X4_INJECT(8, 2, 8, 8);
+    ROUND_X4_INJECT(9, 5, 9, 9);
+    ROUND_X4_INJECT(10, 0, 10, 10);
+    ROUND_X4_INJECT(11, 4, 11, 11);
+    CROSS_STREAM_DIFFUSION();
 
-            /* Golden stream */
-            g[0] = ROTR_VEC(g[0], 7);
-            g[0] = veorq_u32(g[0], fib);
-            g[7] = ROTL_VEC(g[7], 13);
-            g[7] = veorq_u32(g[7], not_fib);
-            uint32x4_t inter_g = vshrq_n_u32(veorq_u32(g[0], g[7]), 16);
-            g[0] = vaddq_u32(g[0], inter_g);
-            g[7] = vaddq_u32(g[7], inter_g);
+    /* Rounds 12-15, then cross-stream + edge */
+    ROUND_X4_INJECT(12, 1, 12, 12);
+    ROUND_X4_INJECT(13, 0, 13, 13);
+    ROUND_X4_INJECT(14, 6, 14, 14);
+    ROUND_X4_INJECT(15, 3, 15, 15);
+    CROSS_STREAM_DIFFUSION();
+    EDGE_PROTECTION(15);
 
-            /* Complementary stream */
-            c[0] = ROTR_VEC(c[0], 7);
-            c[0] = veorq_u32(c[0], fib);
-            c[7] = ROTL_VEC(c[7], 13);
-            c[7] = veorq_u32(c[7], not_fib);
-            uint32x4_t inter_c = vshrq_n_u32(veorq_u32(c[0], c[7]), 16);
-            c[0] = vaddq_u32(c[0], inter_c);
-            c[7] = vaddq_u32(c[7], inter_c);
-        }
-    }
+    /* Rounds 16-19, then cross-stream */
+    ROUND_X4_INJECT(16, 0, 0, 0);
+    ROUND_X4_INJECT(17, 7, 1, 1);
+    ROUND_X4_INJECT(18, 0, 2, 2);
+    ROUND_X4_INJECT(19, 1, 3, 3);
+    CROSS_STREAM_DIFFUSION();
+
+    /* Rounds 20-23, then cross-stream + edge */
+    ROUND_X4_INJECT(20, 2, 4, 4);
+    ROUND_X4_INJECT(21, 3, 5, 5);
+    ROUND_X4_INJECT(22, 1, 6, 6);
+    ROUND_X4_INJECT(23, 4, 7, 7);
+    CROSS_STREAM_DIFFUSION();
+    EDGE_PROTECTION(23);
+
+    /* Rounds 24-27, then cross-stream */
+    ROUND_X4_INJECT(24, 0, 8, 8);
+    ROUND_X4_INJECT(25, 1, 9, 9);
+    ROUND_X4_INJECT(26, 2, 10, 10);
+    ROUND_X4_INJECT(27, 5, 11, 11);
+    CROSS_STREAM_DIFFUSION();
+
+    /* Rounds 28-31, then cross-stream + edge */
+    ROUND_X4_INJECT(28, 0, 12, 12);
+    ROUND_X4_INJECT(29, 4, 13, 13);
+    ROUND_X4_INJECT(30, 1, 14, 14);
+    ROUND_X4_INJECT(31, 0, 15, 15);
+    CROSS_STREAM_DIFFUSION();
+    EDGE_PROTECTION(31);
+
+    #undef ROUND_X4_INJECT
+    #undef CROSS_STREAM_DIFFUSION
+    #undef EDGE_PROTECTION
 
     /* Davies-Meyer: add to original state */
     for (i = 0; i < 8; i++) {
